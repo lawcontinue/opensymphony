@@ -7,7 +7,6 @@ __pycache__/
 dist/
 build/
 *.egg-info/
-*.egg
 
 # Virtual environments
 .venv/
@@ -24,11 +23,8 @@ venv/
 .coverage
 htmlcov/
 
-# Data (runtime, not source)
-data/*.db
-data/*.json
-data/audit/
-data/tool_workshop/
+# Runtime data (not source)
+data/
 
 # Environment
 .env
@@ -39,12 +35,3 @@ Thumbs.db
 
 # Ruff
 .ruff_cache/
-
-# Runtime data
-data/*.db
-data/*.json
-data/*.jsonl
-data/audit/
-data/tool_workshop/active/
-data/tool_workshop/drafts/
-data/tool_workshop/failed/

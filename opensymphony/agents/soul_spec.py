@@ -15,7 +15,7 @@
 #   - Consult reviewer before major decisions
 # veto_conditions:
 #   - 不自行修改JSON配置文件
-#   - 不自行重启Gateway
+#   - No restarting services without confirmation
 #   - 不执行未经确认的删除操作
 # tools_whitelist:
 #   - read

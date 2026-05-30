@@ -1,4 +1,4 @@
-"""WebSocket Bridge — bidirectional real-time bridge between OpenClaw and Symphony."""
+"""WebSocket Bridge — bidirectional real-time bridge between clients and agents."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ logger = logging.getLogger("symphony.bridge")
 
 @dataclass
 class BridgeMessage:
-    """Standard message format for OpenClaw ↔ Symphony communication."""
+    """Standard message format for client ↔ agent communication."""
     id: str = ""
     source: str = ""  # "openclaw" or "symphony"
     target: str = ""  # "openclaw" or "symphony" or specific agent_id
@@ -90,7 +90,7 @@ class BridgeHandler:
             logger.warning(f"Unknown bridge action: {msg.action}")
 
     async def broadcast_event(self, action: str, payload: dict) -> None:
-        """Broadcast an event to all connected OpenClaw clients."""
+        """Broadcast an event to all connected clients."""
         msg = BridgeMessage(
             source="symphony", target="openclaw", type="event",
             action=action, payload=payload,
@@ -108,7 +108,7 @@ class BridgeHandler:
     # ── Action Handlers ──
 
     def _handle_chat(self, msg: BridgeMessage) -> BridgeMessage:
-        """OpenClaw sends a chat request to an agent."""
+        """Client sends a chat request to an agent."""
         soul_id = msg.payload.get("soul_id")
         agent_id = msg.payload.get("agent_id")
         message = msg.payload.get("message", "")
@@ -224,7 +224,7 @@ class BridgeHandler:
 
 
 class BridgeClient:
-    """Client-side connector for OpenClaw to connect to Symphony WebSocket."""
+    """Client-side connector for external client to connect via WebSocket."""
 
     def __init__(self, uri: str = "ws://localhost:8000/bridge"):
         self.uri = uri

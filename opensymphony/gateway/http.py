@@ -1,4 +1,4 @@
-"""HTTP Gateway — FastAPI REST interface for Symphony."""
+"""HTTP Gateway — FastAPI REST interface for OpenSymphony."""
 
 from __future__ import annotations
 
