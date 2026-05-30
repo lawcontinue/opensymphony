@@ -35,9 +35,9 @@ logger = logging.getLogger("symphony")
 def _load_dotenv():
     """Load .env file from project root."""
     candidates = [
-        Path(__file__).parent.parent / ".env",  # symphony-framework/.env
+        Path(__file__).parent.parent / ".env",
         Path(".env"),
-        Path("projects/symphony-framework/.env"),
+        Path(".env"),
     ]
     for p in candidates:
         if p.exists():

@@ -414,7 +414,7 @@ def create_app(kernel: Any):
                 conn_id = uuid.uuid4().hex[:8]
                 welcome = json.dumps({
                     "id": uuid.uuid4().hex[:12], "source": "symphony",
-                    "target": "openclaw", "type": "event",
+                    "target": "client", "type": "event",
                     "action": "connected",
                     "payload": {"conn_id": conn_id, "version": "0.1.0"},
                 }, ensure_ascii=False)

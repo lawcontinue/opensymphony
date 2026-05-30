@@ -52,7 +52,7 @@ def _load_env():
     _ENV_LOADED = True
     env_paths = [
         Path(__file__).parent.parent / ".env",
-        Path.home() / ".openclaw" / "workspace" / "projects" / "symphony-framework" / ".env",
+        Path(__file__).parent.parent / ".env",
     ]
     for p in env_paths:
         if p.exists():

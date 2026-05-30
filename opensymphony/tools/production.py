@@ -100,7 +100,7 @@ class JimengImageTool:
 
     def _download(self, url: str, prompt: str, attempt: int) -> str | None:
         try:
-            download_dir = Path(os.getenv("SYMPHONY_TASKS", "C:/Users/Administrator/symphony/tasks")) / "images"
+            download_dir = Path(os.getenv("SYMPHONY_TASKS", "tasks")) / "images"
             download_dir.mkdir(parents=True, exist_ok=True)
             safe_name = re.sub(r'[^\w]', '_', prompt[:30])[:30]
             filename = f"img_{safe_name}_{attempt}.jpg"
@@ -119,7 +119,7 @@ class MimoTextGenTool:
     name = "mimo_textgen"
     description = "Text generation via Mimo-V2.5 API"
 
-    MIMO_URL = "https://token-plan-cn.xiaomimimo.com/v1/chat/completions"
+    MIMO_URL = os.environ.get("MIMO_API_URL", "https://token-plan-cn.xiaomimimo.com/v1/chat/completions")
     MAX_RETRIES = 3
 
     def execute(self, params: dict) -> dict:

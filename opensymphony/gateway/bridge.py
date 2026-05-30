@@ -18,8 +18,8 @@ logger = logging.getLogger("symphony.bridge")
 class BridgeMessage:
     """Standard message format for client ↔ agent communication."""
     id: str = ""
-    source: str = ""  # "openclaw" or "symphony"
-    target: str = ""  # "openclaw" or "symphony" or specific agent_id
+    source: str = ""  # "client" or "server"
+    target: str = ""  # "client" or "server" or specific agent_id
     type: str = ""    # "command", "event", "query", "response", "notification"
     action: str = ""  # "chat", "create_agent", "task_complete", "vote", "alert"
     payload: dict[str, Any] = field(default_factory=dict)
@@ -62,7 +62,7 @@ class BridgeHandler:
 
         # Send welcome
         await self._send(websocket, BridgeMessage(
-            source="symphony", target="openclaw", type="event",
+            source="server", target="client", type="event",
             action="connected", payload={"conn_id": conn_id, "version": "0.1.0"},
         ))
 
@@ -92,7 +92,7 @@ class BridgeHandler:
     async def broadcast_event(self, action: str, payload: dict) -> None:
         """Broadcast an event to all connected clients."""
         msg = BridgeMessage(
-            source="symphony", target="openclaw", type="event",
+            source="server", target="client", type="event",
             action=action, payload=payload,
         )
         self._log(msg)
@@ -125,7 +125,7 @@ class BridgeHandler:
 
         if not agent:
             return BridgeMessage(
-                source="symphony", target=msg.source, type="response",
+                source="server", target=msg.source, type="response",
                 action="chat_error", payload={"error": "Agent not found"},
                 reply_to=msg.id,
             )
@@ -133,7 +133,7 @@ class BridgeHandler:
         try:
             response = agent.chat(message).content
             return BridgeMessage(
-                source="symphony", target=msg.source, type="response",
+                source="server", target=msg.source, type="response",
                 action="chat_response", payload={
                     "agent_id": agent.id,
                     "soul_name": agent.soul.name if agent.soul else agent.id,
@@ -143,7 +143,7 @@ class BridgeHandler:
             )
         except Exception as e:
             return BridgeMessage(
-                source="symphony", target=msg.source, type="response",
+                source="server", target=msg.source, type="response",
                 action="chat_error", payload={"error": str(e)},
                 reply_to=msg.id,
             )
@@ -152,28 +152,28 @@ class BridgeHandler:
         soul_id = msg.payload.get("soul_id")
         agent = self.kernel.create_agent(soul_id=soul_id)
         return BridgeMessage(
-            source="symphony", target=msg.source, type="response",
+            source="server", target=msg.source, type="response",
             action="agent_created", payload=agent.to_dict(),
             reply_to=msg.id,
         )
 
     def _handle_list_agents(self, msg: BridgeMessage) -> BridgeMessage:
         return BridgeMessage(
-            source="symphony", target=msg.source, type="response",
+            source="server", target=msg.source, type="response",
             action="agent_list", payload={"agents": self.kernel.list_agents()},
             reply_to=msg.id,
         )
 
     def _handle_list_souls(self, msg: BridgeMessage) -> BridgeMessage:
         return BridgeMessage(
-            source="symphony", target=msg.source, type="response",
+            source="server", target=msg.source, type="response",
             action="soul_list", payload={"souls": self.kernel.list_souls()},
             reply_to=msg.id,
         )
 
     def _handle_health(self, msg: BridgeMessage) -> BridgeMessage:
         return BridgeMessage(
-            source="symphony", target=msg.source, type="response",
+            source="server", target=msg.source, type="response",
             action="health", payload=self.kernel.health(),
             reply_to=msg.id,
         )
@@ -185,7 +185,7 @@ class BridgeHandler:
                        reasoning=v.get("reasoning", "")) for v in votes_data]
         result = self.kernel._governance.hold_vote(msg.payload.get("proposal", ""), votes)
         return BridgeMessage(
-            source="symphony", target=msg.source, type="response",
+            source="server", target=msg.source, type="response",
             action="vote_result", payload=result.to_dict(),
             reply_to=msg.id,
         )
@@ -199,14 +199,14 @@ class BridgeHandler:
         agent = self.kernel.get_agent(to_agent)
         if not agent:
             return BridgeMessage(
-                source="symphony", target=msg.source, type="response",
+                source="server", target=msg.source, type="response",
                 action="message_error", payload={"error": f"Agent {to_agent} not found"},
                 reply_to=msg.id,
             )
 
         results = agent.send_message(to_agent, content)
         return BridgeMessage(
-            source="symphony", target=msg.source, type="response",
+            source="server", target=msg.source, type="response",
             action="message_delivered", payload={"results": [str(r) for r in results]},
             reply_to=msg.id,
         )
@@ -245,7 +245,7 @@ class BridgeClient:
         logger.info(f"Bridge connected to {self.uri}")
 
     async def send(self, action: str, payload: dict, msg_type: str = "command") -> BridgeMessage:
-        msg = BridgeMessage(source="openclaw", target="symphony", type=msg_type,
+        msg = BridgeMessage(source="client", target="server", type=msg_type,
                             action=action, payload=payload)
         if self._ws:
             await self._ws.send(msg.to_json())

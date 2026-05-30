@@ -65,7 +65,7 @@ class CharacterCard:
     RETRY_DELAYS = [5, 10, 20]
 
     # Base dir for character cards
-    BASE_DIR = Path(os.getenv("SYMPHONY_CHARS", "C:/Users/Administrator/symphony/characters"))
+    BASE_DIR = Path(os.getenv("SYMPHONY_CHARS", "characters"))
 
     def execute(self, params: dict) -> dict:
         """
