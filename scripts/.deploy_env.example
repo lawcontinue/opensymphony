@@ -1,0 +1,5 @@
+# SSH credentials for deploy_persistence.sh
+SSH_R1="sshpass -p '<R1_PASSWORD>' ssh -o StrictHostKeyChecking=no finance@192.168.1.36"
+SCP_R1="sshpass -p '<R1_PASSWORD>' scp -o StrictHostKeyChecking=no"
+SSH_5060="sshpass -p '<5060TI_PASSWORD>' ssh -o StrictHostKeyChecking=no administrator@192.168.1.100"
+SCP_5060="sshpass -p '<5060TI_PASSWORD>' scp -o StrictHostKeyChecking=no"

@@ -16,6 +16,161 @@ from typing import Any
 
 logger = logging.getLogger("symphony.tools")
 
+# ── Tool schemas (OpenAI function calling format) ────────────────────
+
+TOOL_SCHEMAS = {
+    "quality_check": {
+        "type": "function",
+        "function": {
+            "name": "quality_check",
+            "description": "Run a 5-point quality gate on text: length, format, AI-speak, compliance, structure.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string", "description": "The text to check"},
+                    "soul": {"type": "string", "description": "Soul type for range defaults (social_copy/tech_blogger/default)", "default": "default"},
+                },
+                "required": ["text"],
+            },
+        },
+    },
+    "list_dir": {
+        "type": "function",
+        "function": {
+            "name": "list_dir",
+            "description": "List files in a directory.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Directory path to list"},
+                },
+                "required": ["path"],
+            },
+        },
+    },
+    "file_read": {
+        "type": "function",
+        "function": {
+            "name": "file_read",
+            "description": "Read a file and return its content (max 500KB).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "File path to read"},
+                },
+                "required": ["path"],
+            },
+        },
+    },
+    "file_write": {
+        "type": "function",
+        "function": {
+            "name": "file_write",
+            "description": "Write content to a file. Creates parent directories if needed.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "File path to write"},
+                    "content": {"type": "string", "description": "Content to write"},
+                },
+                "required": ["path", "content"],
+            },
+        },
+    },
+    "file_edit": {
+        "type": "function",
+        "function": {
+            "name": "file_edit",
+            "description": "Replace exact text in a file.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "File path to edit"},
+                    "old_text": {"type": "string", "description": "Exact text to find"},
+                    "new_text": {"type": "string", "description": "Replacement text"},
+                },
+                "required": ["path", "old_text", "new_text"],
+            },
+        },
+    },
+    "legal_review": {
+        "type": "function",
+        "function": {
+            "name": "legal_review",
+            "description": "Extract legal citations from text and append AI disclaimer.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string", "description": "Text to review"},
+                },
+                "required": ["text"],
+            },
+        },
+    },
+    "prompt_extract": {
+        "type": "function",
+        "function": {
+            "name": "prompt_extract",
+            "description": "Extract [IMAGE: ...] markers from text.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string", "description": "Text to extract image prompts from"},
+                },
+                "required": ["text"],
+            },
+        },
+    },
+    "jimeng_image": {
+        "type": "function",
+        "function": {
+            "name": "jimeng_image",
+            "description": "Generate an image via Jimeng CLI.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prompt": {"type": "string", "description": "Image generation prompt"},
+                    "ratio": {"type": "string", "description": "Aspect ratio (e.g. 1:1, 16:9)", "default": "1:1"},
+                    "resolution": {"type": "string", "description": "Resolution (1k/2k/4k)", "default": "2k"},
+                },
+                "required": ["prompt"],
+            },
+        },
+    },
+    "mimo_textgen": {
+        "type": "function",
+        "function": {
+            "name": "mimo_textgen",
+            "description": "Generate text via Mimo-V2.5 API.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prompt": {"type": "string", "description": "Text generation prompt"},
+                    "system_prompt": {"type": "string", "description": "Optional system prompt"},
+                    "max_tokens": {"type": "integer", "description": "Max output tokens", "default": 4096},
+                },
+                "required": ["prompt"],
+            },
+        },
+    },
+    "character_card": {
+        "type": "function",
+        "function": {
+            "name": "character_card",
+            "description": "Generate 3-view character turnaround card via Jimeng CLI.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prompt": {"type": "string", "description": "Character description"},
+                    "session": {"type": "string", "description": "Session ID for consistency"},
+                },
+                "required": ["prompt"],
+            },
+        },
+    },
+}
+
+
 # ── Jimeng Image Generation ──────────────────────────────────────────
 
 class JimengImageTool:

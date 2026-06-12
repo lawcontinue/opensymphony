@@ -270,6 +270,151 @@ class Agent:
             governance=gov_result,
         )
 
+    def chat_with_fc(self, user_message: str, tool_names: list[str] | None = None,
+                     max_iterations: int = 5, **kwargs: Any) -> dict[str, Any]:
+        """Native function calling loop: send → receive tool_calls → execute → inject → repeat.
+
+        Uses provider-native OpenAI-format function calling instead of text parsing.
+
+        Args:
+            user_message: The user's task.
+            tool_names: List of production tool names to enable (e.g. ["quality_check", "file_read"]).
+            max_iterations: Max FC iterations before forcing text answer.
+            **kwargs: Passed to LLMRouter.complete().
+
+        Returns:
+            {"answer": str, "tool_calls": int, "iterations": int, "steps": list}
+        """
+        if not self._router:
+            raise RuntimeError(f"Agent {self.id} not initialized")
+        if not self._session:
+            raise RuntimeError(f"Agent {self.id} has no session")
+
+        # Build tool definitions from production tools
+        from ..tools.production import PRODUCTION_TOOLS, TOOL_SCHEMAS
+        tool_defs = []
+        available_tools = {}
+        for name in (tool_names or []):
+            if name in PRODUCTION_TOOLS:
+                tool_defs.append(TOOL_SCHEMAS.get(name, self._tool_to_schema(name, PRODUCTION_TOOLS[name])))
+                available_tools[name] = PRODUCTION_TOOLS[name]
+
+        # Build messages
+        system = self._system_prompt or "You are a helpful assistant."
+        if tool_defs:
+            tool_names_str = ", ".join(available_tools.keys())
+            system += f"\n\n你可以使用以下工具：{tool_names_str}\n当需要时直接调用工具，不需要时直接回答。"
+        messages = [{"role": "system", "content": system},
+                     {"role": "user", "content": user_message}]
+
+        steps = []
+        tool_call_count = 0
+        last_tool_name = ""
+        same_tool_streak = 0
+
+        for i in range(max_iterations):
+            response = self._router.complete(
+                messages, task_type="chat", tools=tool_defs if tool_defs else None, **kwargs)
+            self._token_usage += response.usage.get("total_tokens", 0)
+
+            # No tool_calls → final text answer
+            if not response.tool_calls:
+                answer = response.content
+                steps.append({"iteration": i + 1, "type": "final", "content": answer[:200]})
+                self._session.add_message("user", user_message)
+                self._session.add_message("assistant", answer)
+                return {"answer": answer, "tool_calls": tool_call_count,
+                        "iterations": i + 1, "steps": steps}
+
+            # Process tool calls
+            assistant_msg = {"role": "assistant", "content": response.content or ""}
+            if response.tool_calls:
+                assistant_msg["tool_calls"] = response.tool_calls
+                # Thinking models (Kimi-K2.6) require reasoning_content in assistant messages with tool_calls.
+                # Non-thinking providers ignore extra fields, so always include it.
+                assistant_msg["reasoning_content"] = ""
+            messages.append(assistant_msg)
+
+            for tc in response.tool_calls:
+                fn = tc.get("function", {})
+                tool_name = fn.get("name", "")
+                tool_args_raw = fn.get("arguments", "{}")
+
+                # Safety: same tool streak detection
+                if tool_name == last_tool_name:
+                    same_tool_streak += 1
+                else:
+                    same_tool_streak = 0
+                    last_tool_name = tool_name
+                if same_tool_streak >= 3:
+                    steps.append({"iteration": i + 1, "type": "error",
+                                  "error": f"Tool '{tool_name}' called {same_tool_streak+1} times consecutively, forcing stop"})
+                    break
+
+                # Parse arguments
+                try:
+                    import json as _json
+                    tool_args = _json.loads(tool_args_raw) if isinstance(tool_args_raw, str) else tool_args_raw
+                except Exception:
+                    tool_args = {}
+
+                # Execute tool
+                tool = available_tools.get(tool_name)
+                if tool:
+                    try:
+                        result = tool.execute(tool_args)
+                        observation = json.dumps(result, ensure_ascii=False, default=str)[:3000]
+                    except Exception as e:
+                        observation = json.dumps({"success": False, "error": str(e)})
+                else:
+                    observation = json.dumps(
+                        {"success": False, "error": f"Tool '{tool_name}' not found. Available: {list(available_tools.keys())}"})
+
+                tool_call_count += 1
+                steps.append({"iteration": i + 1, "type": "tool_call",
+                              "tool": tool_name, "args": tool_args,
+                              "result_preview": observation[:300]})
+
+                # Inject tool result
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.get("id", ""),
+                    "content": observation,
+                })
+
+            if same_tool_streak >= 3:
+                break
+
+        # Max iterations — force text-only final answer
+        final = self._router.complete(messages, task_type="chat", **kwargs)
+        self._token_usage += final.usage.get("total_tokens", 0)
+        answer = final.content
+        self._session.add_message("user", user_message)
+        self._session.add_message("assistant", answer)
+        return {"answer": answer, "tool_calls": tool_call_count,
+                "iterations": max_iterations, "steps": steps, "truncated": True}
+
+    @staticmethod
+    def _tool_to_schema(name: str, tool: Any) -> dict:
+        """Convert a production tool instance to OpenAI function calling schema."""
+        # Try to get structured schema from tool
+        if hasattr(tool, "schema") and isinstance(tool.schema, dict):
+            return tool.schema
+        # Fallback: generate minimal schema from name + description
+        desc = getattr(tool, "description", "No description")
+        return {
+            "type": "function",
+            "function": {
+                "name": name,
+                "description": desc,
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                },
+            },
+        }
+
     def chat_with_tools(self, user_message: str, tools: dict[str, Any] | None = None,
                         max_iterations: int = 5, **kwargs: Any) -> dict[str, Any]:
         """ReAct loop: think → act (tool call) → observe → repeat until done.
@@ -315,7 +460,7 @@ class Agent:
         tool_calls = 0
 
         for i in range(max_iterations):
-            response = self._router.complete(messages, task_type="chat", max_tokens=1024, **kwargs)
+            response = self._router.complete(messages, task_type="chat", **kwargs)
             assistant_msg = response.content
             messages.append({"role": "assistant", "content": assistant_msg})
             self._token_usage += response.usage.get("total_tokens", 0)
@@ -357,7 +502,7 @@ class Agent:
                 steps.append({"iteration": i + 1, "type": "no_action", "content": assistant_msg[:200]})
 
         # Max iterations — force final answer
-        forced = self._router.complete(messages, task_type="chat", max_tokens=512, **kwargs)
+        forced = self._router.complete(messages, task_type="chat", **kwargs)
         answer = forced.content
         self._session.add_message("user", user_message)
         self._session.add_message("assistant", answer)

@@ -35,3 +35,25 @@ Thumbs.db
 
 # Ruff
 .ruff_cache/
+
+# Credentials (never commit)
+.env
+.env.bat
+.deploy_env
+
+# Internal experiment scripts (not for release)
+scripts/emergence_*.py
+scripts/emergence_*.json
+scripts/semantic_divergence.py
+scripts/three_node_emergence.py
+scripts/com.opensymphony.r1.plist
+scripts/start_r1*.sh
+
+# Internal test files
+test_fc_agent_e2e.py
+test_fc_e2e.py
+test_provider_benchmark.py
+
+# Internal config
+config/r1_routing.py
+

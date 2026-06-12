@@ -87,6 +87,7 @@ class ChatRequest(BaseModel):
     task_type: str = "chat"
     max_tokens: int = 4096
     temperature: float = 0.7
+    tools: list[str] | None = None  # tool names to enable for function calling
 
 
 class ChatResponse(BaseModel):
@@ -148,11 +149,25 @@ def create_app(kernel: Any):
             agent = kernel.create_agent(soul_id=req.soul_id, metadata={"task_type": req.task_type})
 
         try:
-            response = agent.chat(
-                req.message,
-                max_tokens=req.max_tokens,
-                temperature=req.temperature,
-            )
+            if req.tools:
+                # Native function calling path
+                result = agent.chat_with_fc(
+                    req.message, tool_names=req.tools,
+                    max_tokens=req.max_tokens, temperature=req.temperature,
+                )
+                soul_name = agent.soul.name if agent.soul else agent.id
+                return ChatResponse(
+                    agent_id=agent.id, soul_name=soul_name,
+                    response=result["answer"],
+                    model="fc-loop",
+                    latency_ms=0.0,
+                )
+            else:
+                response = agent.chat(
+                    req.message,
+                    max_tokens=req.max_tokens,
+                    temperature=req.temperature,
+                )
         except Exception as e:
             # P0-6: Don't leak internal errors
             logger.error(f"Chat error: {e}\n{traceback.format_exc()}")

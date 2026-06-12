@@ -10,15 +10,49 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# SSL context that doesn't verify self-signed certs (for restricted networks)
+def _ssl_ctx():
+    import ssl
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    return ctx
+
 # Default routing table: task_type → ordered list of (provider, model)
-# mimo-v2.5 = flash (fast, content directly), mimo-v2.5-pro = thinking model
+# 熔炉#62 consensus: Mimo-Pro 综合 T0, GLM 结构化 T0, DeepSeek 速度 T0, M3 指令密集 T0
 DEFAULT_ROUTING: dict[str, list[tuple[str, str]]] = {
-    "chat": [("mimo", "mimo-v2.5"), ("deepseek", "deepseek-v4"), ("local", "qwen3-8b")],
-    "code_generation": [("deepseek", "deepseek-v4"), ("mimo", "mimo-v2.5"), ("local", "qwen3-8b")],
-    "creative_writing": [("mimo", "mimo-v2.5"), ("deepseek", "deepseek-v4")],
-    "deep_analysis": [("mimo", "mimo-v2.5-pro"), ("deepseek", "deepseek-v4"), ("kimi", "kimi-k2.6")],
-    "tool_generation": [("mimo", "mimo-v2.5"), ("deepseek", "deepseek-v4")],
-    "structured_output": [("mimo", "mimo-v2.5"), ("deepseek", "deepseek-v4")],
+    # 通用 Agent 日常: Mimo-Pro T0 → GLM → DeepSeek-Pro
+    "chat": [("mimo", "mimo-v2.5-pro"), ("glm", "glm-5.1"), ("deepseek", "deepseek-v4-pro")],
+    # 速度优先场景: DeepSeek-Pro T0 → Mimo-Pro
+    "speed_critical": [("deepseek", "deepseek-v4-pro"), ("mimo", "mimo-v2.5-pro")],
+    # 代码生成: Mimo-Pro T0 → DeepSeek-Pro
+    "code_generation": [("mimo", "mimo-v2.5-pro"), ("deepseek", "deepseek-v4-pro")],
+    # 创意写作: Mimo-Pro → DeepSeek-Pro
+    "creative_writing": [("mimo", "mimo-v2.5-pro"), ("deepseek", "deepseek-v4-pro")],
+    # 深度分析: Mimo-Pro T0 → DeepSeek-Pro → GLM
+    "deep_analysis": [("mimo", "mimo-v2.5-pro"), ("deepseek", "deepseek-v4-pro"), ("glm", "glm-5.1")],
+    # 结构化输出: GLM T0 → Mimo-Pro
+    "structured_output": [("glm", "glm-5.1"), ("mimo", "mimo-v2.5-pro")],
+    # 工具生成/FC: Mimo-Pro → DeepSeek-Pro
+    "tool_generation": [("mimo", "mimo-v2.5-pro"), ("deepseek", "deepseek-v4-pro")],
+    # 指令密集/批处理: M3 T0 → GLM（⚠️ Injection guard 必须启用）
+    "instruction_heavy": [("minimax", "MiniMax-M3"), ("glm", "glm-5.1")],
+    # Flash 日常（低成本快速，未经 benchmark 验证，仅用于非关键路径）
+    "chat_flash": [("deepseek", "deepseek-v4-flash"), ("mimo", "mimo-v2.5")],
+}
+
+# R1-specific routing (MiniMax-M3 primary, local gemma fallback)
+# 熔炉#62: M3 指令密集 T0，结构化需 guard
+R1_ROUTING: dict[str, list[tuple[str, str]]] = {
+    "chat": [("minimax", "MiniMax-M3"), ("local", "mlx-community/gemma-3-12b-it-qat-4bit")],
+    "speed_critical": [("minimax", "MiniMax-M3")],
+    "code_generation": [("minimax", "MiniMax-M3"), ("local", "mlx-community/gemma-3-12b-it-qat-4bit")],
+    "creative_writing": [("minimax", "MiniMax-M3")],
+    "deep_analysis": [("minimax", "MiniMax-M3"), ("local", "mlx-community/gemma-3-12b-it-qat-4bit")],
+    "tool_generation": [("minimax", "MiniMax-M3")],
+    "structured_output": [("minimax", "MiniMax-M3")],  # M3 结构化 43%，需后验证
+    "instruction_heavy": [("minimax", "MiniMax-M3")],  # T0: 指令遵循 100%
+    "chat_flash": [("minimax", "MiniMax-M3")],
 }
 
 
@@ -29,6 +63,7 @@ class LLMResponse:
     provider: str
     usage: dict = field(default_factory=dict)
     latency_ms: float = 0.0
+    tool_calls: list[dict] | None = None  # OpenAI-format tool_calls when present
 
 
 class LLMRouter:
@@ -99,6 +134,8 @@ class LLMRouter:
                 )
             raise
         latency = (time.time() - t0) * 1000
+        # Extract tool_calls passed through usage dict
+        tool_calls = usage.pop("_tool_calls", None)
         if self._telemetry:
             self._telemetry.record_llm(
                 model=model, provider=provider_name, latency_ms=latency,
@@ -106,7 +143,7 @@ class LLMRouter:
                 tokens_in=usage.get("prompt_tokens", 0), tokens_out=usage.get("completion_tokens", 0),
                 success=True, response_preview=content[:200],
             )
-        return LLMResponse(content=content, model=model, provider=provider_name, usage=usage, latency_ms=latency)
+        return LLMResponse(content=content, model=model, provider=provider_name, usage=usage, latency_ms=latency, tool_calls=tool_calls)
 
 
 class BaseProvider:
@@ -158,6 +195,12 @@ class OpenAICompatibleProvider(BaseProvider):
         if "kimi" in model.lower():
             body["temperature"] = 1.0
 
+        # Function calling: add tools to request body
+        tools = kwargs.get("tools")
+        if tools:
+            body["tools"] = tools
+            body["tool_choice"] = "auto"
+
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.api_key}",
@@ -170,7 +213,7 @@ class OpenAICompatibleProvider(BaseProvider):
             method="POST",
         )
 
-        with urllib.request.urlopen(req, timeout=120) as resp:
+        with urllib.request.urlopen(req, timeout=120, context=_ssl_ctx()) as resp:
             data = json.loads(resp.read().decode())
 
         choice = data["choices"][0]["message"]
@@ -178,6 +221,9 @@ class OpenAICompatibleProvider(BaseProvider):
         # Fallback for thinking models where content is empty
         if not content and choice.get("reasoning_content"):
             content = choice["reasoning_content"]
+
+        # Extract tool_calls from response (OpenAI format)
+        raw_tool_calls = choice.get("tool_calls")
 
         # Post-process: strip <think...</think*> tags from thinking models
         if content and "</think" in content:
@@ -191,16 +237,104 @@ class OpenAICompatibleProvider(BaseProvider):
         # Post-process: for Mimo, if content looks like thinking chain (no JSON/structure),
         # try to extract the final answer section
         if content and "mimo" in self.name.lower():
-            # If it's a long thinking chain without structured output, take the last substantive part
-            # Heuristic: look for the last paragraph that contains actual content
             if len(content) > 500 and not content.strip().startswith(("{", "[", "#", "-")):
-                # Split into paragraphs and find the last non-trivial one
                 paragraphs = [p.strip() for p in content.split("\n\n") if len(p.strip()) > 50]
                 if paragraphs:
-                    # Take the last paragraph as the actual answer
                     content = paragraphs[-1]
 
         usage = data.get("usage", {})
+        # Pass tool_calls through usage dict (extracted by LLMRouter._call)
+        if raw_tool_calls:
+            usage["_tool_calls"] = raw_tool_calls
+        return content, usage
+
+
+class AnthropicProvider(BaseProvider):
+    """Provider for Anthropic Messages API (MiniMax, Claude, etc.)."""
+
+    def __init__(self, base_url: str, api_key: str, name: str = "anthropic"):
+        self.base_url = base_url.rstrip("/")
+        self.api_key = api_key
+        self.name = name
+
+    def supports_model(self, model: str) -> bool:
+        return True
+
+    def chat(
+        self, model: str, messages: list[dict], max_tokens: int, temperature: float, **kwargs: Any,
+    ) -> tuple[str, dict]:
+        import json
+        import urllib.request
+
+        # Convert OpenAI messages → Anthropic format
+        system_parts = []
+        anthropic_msgs = []
+        for m in messages:
+            role = m.get("role", "user")
+            content = m.get("content", "")
+            if role == "system":
+                system_parts.append(content)
+            elif role == "assistant":
+                anthropic_msgs.append({"role": "assistant", "content": content})
+            else:
+                anthropic_msgs.append({"role": "user", "content": content})
+
+        body: dict[str, Any] = {
+            "model": model,
+            "messages": anthropic_msgs,
+            "max_tokens": max_tokens,
+        }
+        if system_parts:
+            body["system"] = "\n\n".join(system_parts)
+
+        # FC: add tools if present
+        tools = kwargs.get("tools")
+        if tools:
+            # Convert OpenAI tools → Anthropic format
+            body["tools"] = [
+                {"name": t["function"]["name"],
+                 "description": t["function"].get("description", ""),
+                 "input_schema": t["function"].get("parameters", {"type": "object", "properties": {}})}
+                for t in tools
+            ]
+
+        headers = {
+            "Content-Type": "application/json",
+            "x-api-key": self.api_key,
+            "anthropic-version": "2023-06-01",
+        }
+
+        req = urllib.request.Request(
+            f"{self.base_url}/messages",
+            data=json.dumps(body).encode(),
+            headers=headers,
+            method="POST",
+        )
+
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            data = json.loads(resp.read().decode())
+
+        # Parse Anthropic response
+        content = ""
+        raw_tool_calls = []
+        for block in data.get("content", []):
+            if block.get("type") == "text":
+                content += block.get("text", "")
+            elif block.get("type") == "tool_use":
+                raw_tool_calls.append({
+                    "id": block["id"],
+                    "type": "function",
+                    "function": {"name": block["name"], "arguments": json.dumps(block["input"])},
+                })
+
+        usage = data.get("usage", {})
+        # Normalize usage keys
+        usage = {
+            "prompt_tokens": usage.get("input_tokens", 0),
+            "completion_tokens": usage.get("output_tokens", 0),
+        }
+        if raw_tool_calls:
+            usage["_tool_calls"] = raw_tool_calls
         return content, usage
 
 
@@ -250,9 +384,15 @@ class LocalProvider(BaseProvider):
         return content, usage
 
 
-def create_router_from_env() -> LLMRouter:
-    """Create a router pre-configured from environment variables."""
-    router = LLMRouter()
+def create_router_from_env(routing_preset: str = "default") -> LLMRouter:
+    """Create a router pre-configured from environment variables.
+    
+    routing_preset: "default" for R0/5060Ti, "r1" for R1 (MiniMax-primary)
+    """
+    if routing_preset == "r1":
+        router = LLMRouter(routing=R1_ROUTING)
+    else:
+        router = LLMRouter()
 
     # Mimo
     if api_key := os.environ.get("MIMO_API_KEY"):
@@ -275,10 +415,10 @@ def create_router_from_env() -> LLMRouter:
             api_key=api_key, name="kimi",
         ))
 
-    # GLM / Zhipu
+    # GLM / Zhipu (coding/token-plan endpoint)
     if api_key := os.environ.get("ZHIPU_API_KEY"):
         router.register_provider("zhipu", OpenAICompatibleProvider(
-            base_url=os.environ.get("ZHIPU_BASE_URL", "https://open.bigmodel.cn/api/paas/v4"),
+            base_url=os.environ.get("ZHIPU_BASE_URL", "https://open.bigmodel.cn/api/coding/paas/v4"),
             api_key=api_key, name="zhipu",
         ))
 
@@ -289,5 +429,17 @@ def create_router_from_env() -> LLMRouter:
     elif os.environ.get("ENABLE_LOCAL_LLM", "").lower() in ("1", "true", "yes"):
         router.register_provider("local", LocalProvider(base_url="http://localhost:8080"))
     # Otherwise skip: no noisy connection-refused errors when no local LLM
+
+    # R1 — Remote Mac Mini (mlx_lm server, OpenAI-compatible)
+    r1_url = os.environ.get("R1_LLM_URL", "")
+    if r1_url:
+        router.register_provider("r1", LocalProvider(base_url=r1_url))
+
+    # MiniMax — OpenAI-compatible API
+    if api_key := os.environ.get("MINIMAX_API_KEY"):
+        router.register_provider("minimax", OpenAICompatibleProvider(
+            base_url=os.environ.get("MINIMAX_BASE_URL", "https://api.minimaxi.com/v1"),
+            api_key=api_key, name="minimax",
+        ))
 
     return router

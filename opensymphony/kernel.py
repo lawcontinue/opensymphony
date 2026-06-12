@@ -58,9 +58,11 @@ class SymphonyKernel:
         router: LLMRouter | None = None,
         config: dict[str, Any] | None = None,
         data_dir: Path | str | None = None,
+        routing_preset: str = "default",
     ):
         self.config = config or {}
-        self.router = router or create_router_from_env()
+        self._routing_preset = routing_preset
+        self.router = router or create_router_from_env(routing_preset=routing_preset)
         self.souls_dir = Path(souls_dir) if souls_dir else None
         self.data_dir = Path(data_dir) if data_dir else Path("data")
 
@@ -89,6 +91,10 @@ class SymphonyKernel:
 
     def start(self) -> None:
         _load_dotenv()
+        # Re-init router if no providers loaded (env wasn't available at __init__)
+        if not self.router._providers:
+            self.router = create_router_from_env(routing_preset=self._routing_preset)
+            self.router.set_telemetry(self._telemetry)
         logger.info("Symphony kernel starting...")
         if self.souls_dir and self.souls_dir.exists():
             self._souls = load_souls_dir(self.souls_dir)
@@ -240,11 +246,12 @@ def main():
     parser.add_argument("--souls-dir", type=Path, default=Path("souls"))
     parser.add_argument("--data-dir", type=Path, default=Path("data"))
     parser.add_argument("--log-level", default="info")
+    parser.add_argument("--routing-preset", default="default", choices=["default", "r1"])
     args = parser.parse_args()
 
     logging.basicConfig(level=getattr(logging, args.log_level.upper()))
 
-    kernel = SymphonyKernel(souls_dir=args.souls_dir, data_dir=args.data_dir)
+    kernel = SymphonyKernel(souls_dir=args.souls_dir, data_dir=args.data_dir, routing_preset=args.routing_preset)
     kernel.start()
 
     try:
