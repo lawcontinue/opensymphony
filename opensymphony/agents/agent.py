@@ -114,7 +114,9 @@ class Agent:
         messages.append({"role": "user", "content": user_message})
 
         # For structured-output souls, prepend direct-output instruction to user message
-        structured_souls = {"drama_director", "screenwriter", "reflector", "code"}
+        structured_souls = {"drama_director", "screenwriter", "reflector"}
+        # Note: "code" soul excluded — _extract_substantive is a JSON extractor
+        # that corrupts Python output. Code soul outputs raw text.
         if self.soul and self.soul.id in structured_souls:
             messages[-1]["content"] = "[直接输出最终结果，不要解释、不要分析过程、不要思考]\n\n" + messages[-1]["content"]
 
@@ -136,6 +138,7 @@ class Agent:
         content = response.content
         if content and self.soul and self.soul.id in structured_souls:
             content = self._extract_substantive(content)
+            # "code" soul is excluded from structured_souls, so it outputs as-is
             response = LLMResponse(
                 content=content, model=response.model, provider=response.provider,
                 usage=response.usage, latency_ms=response.latency_ms,
@@ -537,10 +540,18 @@ class Agent:
             elif json_str[i] == "}":
                 depth -= 1
             if depth == 0:
+                candidate = json_str[brace_start:i + 1]
                 try:
-                    return json.loads(json_str[brace_start:i + 1])
+                    return json.loads(candidate)
                 except (json.JSONDecodeError, ValueError):
-                    return None
+                    # Fallback: fix invalid JSON escape sequences
+                    # (e.g. \d, \w, \alpha from regex/LaTeX/paths)
+                    import re as _re
+                    fixed = _re.sub(r'\\([^"\\\/bfnrtu])', r'\\\\\1', candidate)
+                    try:
+                        return json.loads(fixed)
+                    except (json.JSONDecodeError, ValueError):
+                        return None
         return None
 
     def send_message(self, receiver: str, content: Any, msg_type: MessageType = MessageType.REQUEST) -> list[Any]:

@@ -98,6 +98,12 @@ class ChatResponse(BaseModel):
     latency_ms: float
 
 
+class HumanChatRequest(BaseModel):
+    message: str
+    user_id: str
+    target_agent: str | None = None
+
+
 def create_app(kernel: Any):
     """Create FastAPI app bound to a Symphony kernel."""
     from fastapi import FastAPI, HTTPException, Request
@@ -184,10 +190,6 @@ def create_app(kernel: Any):
         )
 
     # ── Human Chat endpoint (v0.3) ───────────────────────────────
-    class HumanChatRequest(BaseModel):
-        message: str
-        user_id: str
-        target_agent: str | None = None
 
     @app.post("/human/chat")
     async def human_chat(req: HumanChatRequest, request: Request):

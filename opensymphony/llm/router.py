@@ -22,23 +22,23 @@ def _ssl_ctx():
 # 熔炉#62 consensus: Mimo-Pro 综合 T0, GLM 结构化 T0, DeepSeek 速度 T0, M3 指令密集 T0
 DEFAULT_ROUTING: dict[str, list[tuple[str, str]]] = {
     # 通用 Agent 日常: Mimo-Pro T0 → GLM → DeepSeek-Pro
-    "chat": [("mimo", "mimo-v2.5-pro"), ("glm", "glm-5.1"), ("deepseek", "deepseek-v4-pro")],
-    # 速度优先场景: DeepSeek-Pro T0 → Mimo-Pro
-    "speed_critical": [("deepseek", "deepseek-v4-pro"), ("mimo", "mimo-v2.5-pro")],
-    # 代码生成: Mimo-Pro T0 → DeepSeek-Pro
-    "code_generation": [("mimo", "mimo-v2.5-pro"), ("deepseek", "deepseek-v4-pro")],
-    # 创意写作: Mimo-Pro → DeepSeek-Pro
-    "creative_writing": [("mimo", "mimo-v2.5-pro"), ("deepseek", "deepseek-v4-pro")],
-    # 深度分析: Mimo-Pro T0 → DeepSeek-Pro → GLM
-    "deep_analysis": [("mimo", "mimo-v2.5-pro"), ("deepseek", "deepseek-v4-pro"), ("glm", "glm-5.1")],
-    # 结构化输出: GLM T0 → Mimo-Pro
-    "structured_output": [("glm", "glm-5.1"), ("mimo", "mimo-v2.5-pro")],
-    # 工具生成/FC: Mimo-Pro → DeepSeek-Pro
-    "tool_generation": [("mimo", "mimo-v2.5-pro"), ("deepseek", "deepseek-v4-pro")],
-    # 指令密集/批处理: M3 T0 → GLM（⚠️ Injection guard 必须启用）
-    "instruction_heavy": [("minimax", "MiniMax-M3"), ("glm", "glm-5.1")],
-    # Flash 日常（低成本快速，未经 benchmark 验证，仅用于非关键路径）
-    "chat_flash": [("deepseek", "deepseek-v4-flash"), ("mimo", "mimo-v2.5")],
+    "chat": [("mimo", "mimo-v2.5"), ("glm", "glm-4.6"), ("deepseek", "deepseek-chat")],
+    # 速度优先场景: DeepSeek → Mimo
+    "speed_critical": [("deepseek", "deepseek-chat"), ("mimo", "mimo-v2.5")],
+    # 代码生成: Mimo → DeepSeek
+    "code_generation": [("mimo", "mimo-v2.5"), ("deepseek", "deepseek-chat")],
+    # 创意写作: Mimo → DeepSeek
+    "creative_writing": [("mimo", "mimo-v2.5"), ("deepseek", "deepseek-chat")],
+    # 深度分析: Mimo → DeepSeek → GLM
+    "deep_analysis": [("mimo", "mimo-v2.5"), ("deepseek", "deepseek-chat"), ("glm", "glm-4.6")],
+    # 结构化输出: GLM → Mimo
+    "structured_output": [("glm", "glm-4.6"), ("mimo", "mimo-v2.5")],
+    # 工具生成/FC: Mimo → DeepSeek
+    "tool_generation": [("mimo", "mimo-v2.5"), ("deepseek", "deepseek-chat")],
+    # 指令密集/批处理: M3 → GLM（⚠️ Injection guard 必须启用）
+    "instruction_heavy": [("minimax", "MiniMax-M3"), ("glm", "glm-4.6")],
+    # Flash 日常（低成本快速）
+    "chat_flash": [("deepseek", "deepseek-chat"), ("mimo", "mimo-v2.5")],
 }
 
 # R1-specific routing (MiniMax-M3 primary, local gemma fallback)
