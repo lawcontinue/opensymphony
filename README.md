@@ -68,6 +68,54 @@ pytest
 python -m opensymphony.gateway.http
 ```
 
+The server listens on `0.0.0.0:8000` by default. To customize:
+
+```bash
+# Custom host/port
+GATEWAY_HOST=127.0.0.1 GATEWAY_PORT=18792 python -m opensymphony.gateway.http
+
+# Run with uvicorn directly (more control)
+pip install "uvicorn[standard]"
+uvicorn opensymphony.gateway.http:create_app --factory --host 127.0.0.1 --port 18792
+```
+
+### Gateway Endpoints (excerpt)
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET`  | `/health` | liveness, provider list, soul/tool counts |
+| `GET`  | `/souls` | list loaded souls |
+| `POST` | `/chat` | send a message to a soul (`{"message": "...", "soul_id": "default"}`) |
+| `POST` | `/human/chat` | human-facing chat via IntentBridge (`{"message": "...", "user_id": "..."}`) |
+| `POST` | `/pipeline/run` | run a declarative pipeline |
+| `GET`  | `/governance/health` | governance subsystem status |
+| `GET`  | `/telemetry/summary` | today's LLM/tool/error counters |
+| `GET`  | `/skills` | skills registry |
+
+For the full endpoint list, see `gateway/http.py` — every handler is decorated
+with `@app.get` or `@app.post` near the top of the file.
+
+### Provider configuration
+
+The gateway picks up LLM credentials from environment variables:
+
+```bash
+export MIMO_API_KEY=...        # or any other provider
+export DEEPSEEK_API_KEY=...
+export MOONSHOT_API_KEY=...
+export ZHIPU_API_KEY=...
+export MINIMAX_API_KEY=...
+export OPENAI_API_KEY=...
+
+# Optional: override the default model per provider
+export MIMO_MODEL=mimo-v2.5
+export DEEPSEEK_MODEL=deepseek-chat
+export MINIMAX_MODEL=MiniMax-M3
+```
+
+See `opensymphony/llm/router.py` `create_router_from_env()` for the full
+provider list.
+
 ### Example: Define a Soul
 
 ```yaml
