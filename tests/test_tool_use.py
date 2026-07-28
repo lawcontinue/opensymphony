@@ -130,6 +130,38 @@ class TestAgentToolUse:
     def test_parse_tool_call_none(self):
         assert Agent._parse_tool_call("no tool call here") is None
 
+    def test_parse_tool_call_windows_path(self):
+        """Regression for issue #3: raw Windows path with single backslashes
+        (e.g. \\Users\\foo) should be repaired, not silently dropped.
+        """
+        text = r'TOOL_CALL: {"name": "file_read", "params": {"path": "C:\\Users\\foo\\bar.txt"}}'
+        result = Agent._parse_tool_call(text)
+        assert result == {"name": "file_read",
+                          "params": {"path": "C:\\Users\\foo\\bar.txt"}}
+
+    def test_parse_tool_call_preserves_valid_escapes(self):
+        """Regression for issue #3: valid JSON escapes (\\n, \\t, \\\\) must
+        round-trip through the repair step unchanged.
+        """
+        text = r'TOOL_CALL: {"name": "echo", "params": {"msg": "line1\nline2\ttab"}}'
+        result = Agent._parse_tool_call(text)
+        assert result == {"name": "echo", "params": {"msg": "line1\nline2\ttab"}}
+
+    def test_parse_tool_call_unicode_escape_preserved(self):
+        """Regression for issue #3: \\uXXXX escapes are valid and must not
+        be double-escaped by the repair regex.
+        """
+        text = r'TOOL_CALL: {"name": "echo", "params": {"q": "caf\u00e9"}}'
+        result = Agent._parse_tool_call(text)
+        assert result == {"name": "echo", "params": {"q": "café"}}
+
+    def test_parse_tool_call_rejects_total_garbage(self):
+        """Regression for issue #3: after repair, truly invalid JSON still
+        returns None (no crash, no silent success).
+        """
+        result = Agent._parse_tool_call("TOOL_CALL: {not even close")
+        assert result is None
+
     def test_react_loop_with_tool(self, tmp_path):
         """Agent reads a file then gives final answer."""
         # Setup: write a file
